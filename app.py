@@ -20,13 +20,15 @@ def get_intervalo_dia_local(agora_utc, fuso="America/Sao_Paulo"):
     fim = inicio + timedelta(hours=23, minutes=59, seconds=59)
     return inicio.astimezone(pytz.UTC), fim.astimezone(pytz.UTC)
 
-# 🔢 Calcula a diferença entre o primeiro e o último valor de um campo
+# 🔢 Calcula a diferença entre o primeiro e o último valor de um campo dentro do período
 def calcular_delta(df, nome, campo, inicio, fim):
     dados = df[df["Name"] == nome].sort_values("DataHora")
-    intervalo = dados[(dados["DataHora"] >= inicio) & (dados["DataHora"] <= fim)]
-    if intervalo.shape[0] >= 2:
-        return int(intervalo.iloc[-1][campo]) - int(intervalo.iloc[0][campo])
-    return 0
+    periodo = dados[(dados["DataHora"] >= inicio) & (dados["DataHora"] <= fim)]
+    if periodo.empty or len(periodo) == 1:
+        return 0
+    reg_inicio = periodo.iloc[0]
+    reg_fim = periodo.iloc[-1]
+    return int(reg_fim[campo]) - int(reg_inicio[campo])
 
 # 🔼 Retorna HTML com cor e seta para mostrar variações no resumo individual
 def seta_unicode(valor, tipo):
@@ -76,6 +78,9 @@ df.dropna(subset=["DataHora"], inplace=True)
 # 📚 Organiza por personagem e ordem cronológica
 df.sort_values(["Name", "DataHora"], inplace=True)
 
+# Crie uma coluna auxiliar com DataHora no fuso BRT
+df["DataHora_BRT"] = df["DataHora"].dt.tz_convert("America/Sao_Paulo")
+
 # ===============================================================
 # 🕓 VARIÁVEIS GLOBAIS DE TEMPO E PERÍODOS DE REFERÊNCIA
 # ---------------------------------------------------------------
@@ -91,9 +96,15 @@ brt = pytz.timezone("America/Sao_Paulo")  # Fuso horário local
 # 📆 Intervalo de hoje no horário de Brasília
 inicio_dia, fim_dia = get_intervalo_dia_local(agora)
 
-# 📅 Início do mês e do ano com base no timestamp mais recente
-inicio_mes = agora.replace(day=1)
-inicio_ano = agora.replace(month=1, day=1)
+# 📅 Início do mês e do ano com base no menor timestamp disponível no mês/ano
+agora_brt = agora.tz_convert("America/Sao_Paulo")
+inicio_mes = df[df["DataHora_BRT"].dt.month == agora_brt.month]["DataHora"].min()
+if pd.isna(inicio_mes):
+    # fallback: início do mês no fuso BRT convertido para UTC
+    inicio_mes = agora_brt.replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.UTC)
+inicio_ano = df[df["DataHora_BRT"].dt.year == agora_brt.year]["DataHora"].min()
+if pd.isna(inicio_ano):
+    inicio_ano = agora_brt.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.UTC)
 
 # 🔍 Primeira e última data disponíveis na base
 primeiro_registro = df["DataHora"].min()
@@ -146,7 +157,7 @@ with st.sidebar:
     """)
 
     st.markdown("---")
-    st.caption("🔧 Desenvolvido por Iury • donates para Paladina Revoltada")
+    st.caption("🔧 Desenvolvido por Paladina Revoltada")
 
 
 # ===============================================================
@@ -206,55 +217,97 @@ st.download_button(
 )
 
 # ===============================================================
-# 📋 RESUMO INDIVIDUAL DO PERSONAGEM
+# 📋 RESUMO CONSOLIDADO - PERSONAGEM + PERÍODOS
 # ---------------------------------------------------------------
-# Exibe evolução de XP, Level e Rank para o personagem escolhido
-# com comparação em diferentes períodos (dia, semana, mês, ano)
-# ===============================================================
 
 st.markdown("---")
-st.header("📋 Resumo Individual do Personagem")
+st.header("📋 Evolução do Personagem por Período")
 
 # 🎯 Seleção de personagem
-personagem = st.selectbox("👤 Selecione um personagem:", df["Name"].unique(), key="resumo_individual")
-df_p = df[df["Name"] == personagem].sort_values("DataHora").copy()
+personagem = st.selectbox("👤 Escolha o personagem:", df["Name"].unique())
+df_p = df[df["Name"] == personagem].copy().sort_values("DataHora")
 
-# 📊 Compilação dos dados de progresso
-resumo_ind = {
-    "Período": ["Dia", "Semana", "Mês", "Ano"],
-    "XP Gained": [
-        calcular_delta(df, personagem, "Points", inicio_dia, fim_dia),
-        calcular_delta(df, personagem, "Points", agora - timedelta(days=7), agora),
-        calcular_delta(df, personagem, "Points", inicio_mes, agora),
-        calcular_delta(df, personagem, "Points", inicio_ano, agora),
-    ],
-    "Δ Level": [
-        seta_unicode(calcular_delta(df, personagem, "Level", inicio_dia, fim_dia), "level"),
-        seta_unicode(calcular_delta(df, personagem, "Level", agora - timedelta(days=7), agora), "level"),
-        seta_unicode(calcular_delta(df, personagem, "Level", inicio_mes, agora), "level"),
-        seta_unicode(calcular_delta(df, personagem, "Level", inicio_ano, agora), "level"),
-    ],
-    "Δ Rank": [
-        seta_unicode(-calcular_delta(df, personagem, "Rank", inicio_dia, fim_dia), "rank"),
-        seta_unicode(-calcular_delta(df, personagem, "Rank", agora - timedelta(days=7), agora), "rank"),
-        seta_unicode(-calcular_delta(df, personagem, "Rank", inicio_mes, agora), "rank"),
-        seta_unicode(-calcular_delta(df, personagem, "Rank", inicio_ano, agora), "rank"),
-    ],
-}
+# 📅 Dias disponíveis com registros desse personagem
+dias_disponiveis = df_p["DataHora_BRT"].dt.date.unique()
+ultimo_dia = dias_disponiveis.max()
 
-# 🧾 Exibição dos dados formatados em HTML
-df_resumo_ind = pd.DataFrame(resumo_ind)
-st.markdown(df_resumo_ind.to_html(index=False, escape=False), unsafe_allow_html=True)
-
-# 💾 Botão para baixar os dados como CSV
-csv_ind = df_resumo_ind.to_csv(index=False).encode("utf-8")
-st.download_button(
-    "⬇️ Baixar resumo individual",
-    data=csv_ind,
-    file_name=f"{personagem}_resumo_individual.csv",
-    mime="text/csv"
+# 📆 Seletor de dia (default: último dia com registro)
+data_dia = st.selectbox(
+    "📅 Escolha o dia para análise:",
+    sorted(dias_disponiveis),
+    index=len(dias_disponiveis) - 1
 )
 
+# 🗓️ Construir intervalos
+brt = pytz.timezone("America/Sao_Paulo")
+inicio_dia = brt.localize(datetime.combine(data_dia, time(0, 0))).astimezone(pytz.UTC)
+fim_dia = inicio_dia + timedelta(hours=23, minutes=59, seconds=59)
+
+inicio_semana = brt.localize(datetime.combine(data_dia - timedelta(days=data_dia.weekday()), time(0, 0))).astimezone(pytz.UTC)
+fim_semana = inicio_semana + timedelta(days=6, hours=23, minutes=59, seconds=59)
+
+inicio_mes_local = datetime(data_dia.year, data_dia.month, 1, 0, 0)
+inicio_mes = brt.localize(inicio_mes_local).astimezone(pytz.UTC)
+if data_dia.month == 12:
+    fim_mes_local = datetime(data_dia.year + 1, 1, 1, 0, 0) - timedelta(seconds=1)
+else:
+    fim_mes_local = datetime(data_dia.year, data_dia.month + 1, 1, 0, 0) - timedelta(seconds=1)
+fim_mes = brt.localize(fim_mes_local).astimezone(pytz.UTC)
+
+# 🔁 Função com triângulos brancos e fallback
+def evolucao_formatada(df_p, inicio, fim):
+    hist = df_p[(df_p["DataHora"] >= inicio) & (df_p["DataHora"] <= fim)].sort_values("DataHora")
+
+    if len(hist) < 2:
+        # Fallback somente para level e rank, XP continua 0
+        ultimo = df_p.iloc[-1] if not df_p.empty else None
+        if ultimo is not None:
+            lvl_str = f"{int(ultimo['Level'])} ➖"
+            rank_str = f"{int(ultimo['Rank'])} ➖"
+            xp_str = "0"
+            return lvl_str, rank_str, xp_str
+        else:
+            return "-", "-", "0"
+
+    # ✅ Cálculo com dados suficientes
+    lvl_ini = int(hist.iloc[0]["Level"])
+    lvl_fim = int(hist.iloc[-1]["Level"])
+    lvl_diff = lvl_fim - lvl_ini
+    lvl_str = f"{lvl_ini} {'▲' if lvl_diff > 0 else '▼' if lvl_diff < 0 else '➖'} {abs(lvl_diff)}" if lvl_diff != 0 else f"{lvl_ini} ➖"
+
+    rank_ini = int(hist.iloc[0]["Rank"])
+    rank_fim = int(hist.iloc[-1]["Rank"])
+    rank_diff = rank_ini - rank_fim
+    rank_str = f"{rank_ini} {'▲' if rank_diff > 0 else '▼' if rank_diff < 0 else '➖'} {abs(rank_diff)}" if rank_diff != 0 else f"{rank_ini} ➖"
+
+    xp_gained = int(hist.iloc[-1]["Points"]) - int(hist.iloc[0]["Points"])
+    xp_str = f"{xp_gained:,.0f}".replace(",", ".")
+    return lvl_str, rank_str, xp_str
+
+# ✅ Aplicação da função para períodos
+lvl_dia, rank_dia, xp_dia = evolucao_formatada(df_p, inicio_dia, fim_dia)
+lvl_sem, rank_sem, xp_sem = evolucao_formatada(df_p, inicio_semana, fim_semana)
+lvl_mes, rank_mes, xp_mes = evolucao_formatada(df_p, inicio_mes, fim_mes)
+
+# 📄 Montagem da tabela final
+df_formatado = pd.DataFrame([
+    {"Período": "Dia", "Level Inicial": lvl_dia, "Rank Inicial": rank_dia, "XP Ganha": xp_dia},
+    {"Período": "Semana", "Level Inicial": lvl_sem, "Rank Inicial": rank_sem, "XP Ganha": xp_sem},
+    {"Período": "Mês", "Level Inicial": lvl_mes, "Rank Inicial": rank_mes, "XP Ganha": xp_mes},
+])
+
+# 🎨 Exibição
+st.markdown("### 📈 Progresso Consolidado")
+st.dataframe(df_formatado, use_container_width=True, hide_index=True)
+
+# 💾 Download
+csv_export = df_formatado.to_csv(index=False).encode("utf-8")
+st.download_button(
+    "⬇️ Baixar resumo consolidado",
+    data=csv_export,
+    file_name=f"{personagem}_resumo_periodos.csv",
+    mime="text/csv"
+)
 # 📎 Rodapé com períodos considerados
 inicio_fmt = inicio_dia.astimezone(brt).strftime('%d/%m %H:%M')
 fim_fmt = fim_dia.astimezone(brt).strftime('%d/%m %H:%M')
