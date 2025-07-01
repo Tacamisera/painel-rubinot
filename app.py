@@ -220,59 +220,48 @@ st.download_button(
 )
 
 # ===============================================================
-# 📋 RESUMO CONSOLIDADO - PERSONAGEM + PERÍODOS
+# 📋 EVOLUÇÃO DO PERSONAGEM POR PERÍODO (ACUMULADO ATÉ O DIA)
 # ---------------------------------------------------------------
+
+from datetime import datetime, timedelta, time, date  # 🔧 GARANTA que essa linha está no topo
 
 st.markdown("---")
 st.header("📋 Evolução do Personagem por Período")
 
-# 🎯 Seleção de personagem
+# 🎯 Seletor de personagem
 personagem = st.selectbox("👤 Escolha o personagem:", df["Name"].unique())
 df_p = df[df["Name"] == personagem].copy().sort_values("DataHora")
 
-# 📅 Dias disponíveis com registros desse personagem
+# 📅 Datas disponíveis desse personagem
 dias_disponiveis = df_p["DataHora_BRT"].dt.date.unique()
-ultimo_dia = dias_disponiveis.max()
-
-# 📆 Seletor de dia (default: último dia com registro)
 data_dia = st.selectbox(
     "📅 Escolha o dia para análise:",
     sorted(dias_disponiveis),
-    index=len(dias_disponiveis) - 1
+    index=len(dias_disponiveis) - 1  # padrão: último dia com registro
 )
 
-# 🗓️ Construir intervalos
+# 🌎 Timezone e marca de corte
 brt = pytz.timezone("America/Sao_Paulo")
+fim_do_dia = brt.localize(datetime.combine(data_dia, time(23, 59, 59))).astimezone(pytz.UTC)
+
+# 📅 Períodos construídos até o fim do dia escolhido
 inicio_dia = brt.localize(datetime.combine(data_dia, time(0, 0))).astimezone(pytz.UTC)
-fim_dia = inicio_dia + timedelta(hours=23, minutes=59, seconds=59)
-
 inicio_semana = brt.localize(datetime.combine(data_dia - timedelta(days=data_dia.weekday()), time(0, 0))).astimezone(pytz.UTC)
-fim_semana = inicio_semana + timedelta(days=6, hours=23, minutes=59, seconds=59)
+inicio_mes = brt.localize(datetime.combine(date(data_dia.year, data_dia.month, 1), time(0, 0))).astimezone(pytz.UTC)
 
-inicio_mes_local = datetime(data_dia.year, data_dia.month, 1, 0, 0)
-inicio_mes = brt.localize(inicio_mes_local).astimezone(pytz.UTC)
-if data_dia.month == 12:
-    fim_mes_local = datetime(data_dia.year + 1, 1, 1, 0, 0) - timedelta(seconds=1)
-else:
-    fim_mes_local = datetime(data_dia.year, data_dia.month + 1, 1, 0, 0) - timedelta(seconds=1)
-fim_mes = brt.localize(fim_mes_local).astimezone(pytz.UTC)
+fim_dia = fim_semana = fim_mes = fim_do_dia  # mesmo fim para todos
 
-# 🔁 Função com triângulos brancos e fallback
+# 🔁 Função para calcular e formatar os resultados
 def evolucao_formatada(df_p, inicio, fim):
     hist = df_p[(df_p["DataHora"] >= inicio) & (df_p["DataHora"] <= fim)].sort_values("DataHora")
 
     if len(hist) < 2:
-        # Fallback somente para level e rank, XP continua 0
         ultimo = df_p.iloc[-1] if not df_p.empty else None
-        if ultimo is not None:
-            lvl_str = f"{int(ultimo['Level'])} ➖"
-            rank_str = f"{int(ultimo['Rank'])} ➖"
-            xp_str = "0"
-            return lvl_str, rank_str, xp_str
-        else:
-            return "-", "-", "0"
+        lvl_str = f"{int(ultimo['Level'])} ➖" if ultimo is not None else "-"
+        rank_str = f"{int(ultimo['Rank'])} ➖" if ultimo is not None else "-"
+        xp_str = "0"
+        return lvl_str, rank_str, xp_str
 
-    # ✅ Cálculo com dados suficientes
     lvl_ini = int(hist.iloc[0]["Level"])
     lvl_fim = int(hist.iloc[-1]["Level"])
     lvl_diff = lvl_fim - lvl_ini
@@ -280,23 +269,23 @@ def evolucao_formatada(df_p, inicio, fim):
 
     rank_ini = int(hist.iloc[0]["Rank"])
     rank_fim = int(hist.iloc[-1]["Rank"])
-    rank_diff = rank_ini - rank_fim
+    rank_diff = rank_ini - rank_fim  # menor = melhor
     rank_str = f"{rank_ini} {'▲' if rank_diff > 0 else '▼' if rank_diff < 0 else '➖'} {abs(rank_diff)}" if rank_diff != 0 else f"{rank_ini} ➖"
 
     xp_gained = int(hist.iloc[-1]["Points"]) - int(hist.iloc[0]["Points"])
     xp_str = f"{xp_gained:,.0f}".replace(",", ".")
     return lvl_str, rank_str, xp_str
 
-# ✅ Aplicação da função para períodos
+# 🧠 Calcula os três blocos
 lvl_dia, rank_dia, xp_dia = evolucao_formatada(df_p, inicio_dia, fim_dia)
 lvl_sem, rank_sem, xp_sem = evolucao_formatada(df_p, inicio_semana, fim_semana)
 lvl_mes, rank_mes, xp_mes = evolucao_formatada(df_p, inicio_mes, fim_mes)
 
-# 📄 Montagem da tabela final
+# 📄 DataFrame formatado
 df_formatado = pd.DataFrame([
     {"Período": "Dia", "Level Inicial": lvl_dia, "Rank Inicial": rank_dia, "XP Ganha": xp_dia},
-    {"Período": "Semana", "Level Inicial": lvl_sem, "Rank Inicial": rank_sem, "XP Ganha": xp_sem},
-    {"Período": "Mês", "Level Inicial": lvl_mes, "Rank Inicial": rank_mes, "XP Ganha": xp_mes},
+    {"Período": "Semana (até dia)", "Level Inicial": lvl_sem, "Rank Inicial": rank_sem, "XP Ganha": xp_sem},
+    {"Período": "Mês (até dia)", "Level Inicial": lvl_mes, "Rank Inicial": rank_mes, "XP Ganha": xp_mes},
 ])
 
 # 🎨 Exibição
