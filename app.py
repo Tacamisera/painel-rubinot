@@ -140,24 +140,27 @@ st.markdown(f"""
 # ===============================================================
 
 with st.sidebar:
-    st.header("📘 Instruções")
-    st.markdown("""
+    
+    # 📌 Formata a última atualização no horário de Brasília
+    brt = pytz.timezone("America/Sao_Paulo")
+    ultimo_fmt_sidebar = ultimo_registro.astimezone(brt).strftime('%d/%m/%Y %H:%M:%S')
+
+    st.markdown(f"""
     Este painel mostra a evolução do TOP 100 do servidor **Elysian** no Rubinot.
+    
+    • Última atualização: **{ultimo_fmt_sidebar}**  
+    • Variação de XP, Level e Rank (Dia, Semana, Mês, Ano)
+    
+    **Dica:** 
+    use o seletor de personagem para visualizar a evolução detalhada ao longo do tempo.
 
-    **🔁 Atualização automática**
-    - Coleta de dados a cada 10 minutos
-    - Dados processados e exibidos em tempo real
+    Doações são bem-vindas para manter o painel atualizado!
 
-    **📊 Funcionalidades**
-    - Tabela completa do TOP 100 com deltas (XP, Level, Rank)
-    - Resumo individual por personagem (diário, semanal, mensal, anual)
-    - Download dos dados para uso externo
-
-    **🔍 Dica:** use o seletor de personagem para visualizar a evolução detalhada ao longo do tempo.
+    👾 Desenvolvido por 👾: 
+    **Paladina Revoltada**
     """)
 
     st.markdown("---")
-    st.caption("🔧 Desenvolvido por Paladina Revoltada")
 
 
 # ===============================================================
