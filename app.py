@@ -11,7 +11,7 @@ import os
 # Tentativa de importar autorefresh com fallback
 try:
     from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=60000, limit=None, key="refresh")
+    st_autorefresh(interval=600000, limit=None, key="refresh")
 except ImportError:
     st.warning("🔄 Autorefresh desabilitado (streamlit-autorefresh não instalado). Para habilitar, use: pip install streamlit-autorefresh")
 
