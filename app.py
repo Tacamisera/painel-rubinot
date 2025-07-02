@@ -1,19 +1,22 @@
 # ===============================================================
 # 📦 IMPORTAÇÕES E FUNÇÕES AUXILIARES
-# ---------------------------------------------------------------
-# Bibliotecas, timezone e funções utilitárias para:
-# • Obter o intervalo do dia no fuso horário brasileiro
-# • Calcular diferenças de XP, nível ou rank entre datas
-# • Formatar setas visuais para variações
 # ===============================================================
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date
 import pytz
 import os
 
-# ⏰ Retorna o início e o fim do dia no fuso horário informado
+# Tentativa de importar autorefresh com fallback
+try:
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=60000, limit=None, key="refresh")
+except ImportError:
+    st.warning("🔄 Autorefresh desabilitado (streamlit-autorefresh não instalado). Para habilitar, use: pip install streamlit-autorefresh")
+
+# ⏰ Intervalo do dia local
+
 def get_intervalo_dia_local(agora_utc, fuso="America/Sao_Paulo"):
     brt = pytz.timezone(fuso)
     hoje_brt = agora_utc.astimezone(brt).date()
@@ -21,31 +24,26 @@ def get_intervalo_dia_local(agora_utc, fuso="America/Sao_Paulo"):
     fim = inicio + timedelta(hours=23, minutes=59, seconds=59)
     return inicio.astimezone(pytz.UTC), fim.astimezone(pytz.UTC)
 
-# 🔢 Calcula a diferença entre o primeiro e o último valor de um campo dentro do período
+# 🔢 Cálculo de diferenças
+
 def calcular_delta(df, nome, campo, inicio, fim):
     dados = df[df["Name"] == nome].sort_values("DataHora")
     periodo = dados[(dados["DataHora"] >= inicio) & (dados["DataHora"] <= fim)]
     if periodo.empty or len(periodo) == 1:
         return 0
-    reg_inicio = periodo.iloc[0]
-    reg_fim = periodo.iloc[-1]
-    return int(reg_fim[campo]) - int(reg_inicio[campo])
+    return int(periodo.iloc[-1][campo]) - int(periodo.iloc[0][campo])
 
-# 🔼 Retorna HTML com cor e seta para mostrar variações no resumo individual
-def seta_unicode(valor, tipo):
+# 🔼 Setas visuais
+
+def seta_emoji(valor):
     if valor > 0:
-        return f"<span style='color:green'>▲ {valor}</span>"
+        return f"🔼 {valor}"
     elif valor < 0:
-        return f"<span style='color:red'>▼ {abs(valor)}</span>"
-    return "–"
-
-
+        return f"🔽 {abs(valor)}"
+    return "➖"
 
 # ===============================================================
-# 📂 CARREGAR O CSV COM OS DADOS
-# ---------------------------------------------------------------
-# Tenta carregar o arquivo 'top100.csv' com parsing de datas.
-# Interrompe o app com uma mensagem caso o arquivo falhe ou esteja vazio.
+# 📂 CARREGAMENTO E PRÉ-PROCESSAMENTO
 # ===============================================================
 
 try:
@@ -54,155 +52,65 @@ except Exception as e:
     st.error(f"❌ Erro ao carregar 'top100.csv': {e}")
     st.stop()
 
-# 🔄 Verifica se o arquivo foi atualizado fora do app
 caminho_csv = "top100.csv"
 ultima_modif = os.path.getmtime(caminho_csv)
-
 if "ultima_modif_salva" not in st.session_state:
     st.session_state["ultima_modif_salva"] = ultima_modif
 elif st.session_state["ultima_modif_salva"] != ultima_modif:
     st.session_state["ultima_modif_salva"] = ultima_modif
     st.rerun()
 
-# 🧼 Validação de conteúdo do arquivo
 if df.empty or df["DataHora"].isna().all():
     st.warning("📭 O arquivo está vazio ou sem datas válidas.")
     st.stop()
 
-# ===============================================================
-# 🧼 LIMPEZA E PRÉ-PROCESSAMENTO DOS DADOS
-# ---------------------------------------------------------------
-# Trata colunas de datas e números, remove dados inválidos
-# e ordena cronologicamente por personagem
-# ===============================================================
-
-# 🔁 Converte datas para datetime com UTC
 df["DataHora"] = pd.to_datetime(df["DataHora"], utc=True)
-
-# 🔢 Converte campos numéricos com tratamento de erro
 df["Level"] = pd.to_numeric(df["Level"], errors="coerce")
 df["Rank"] = pd.to_numeric(df["Rank"], errors="coerce")
 df["Points"] = pd.to_numeric(df["Points"], errors="coerce")
-
-# 🧽 Remove registros sem data válida
 df.dropna(subset=["DataHora"], inplace=True)
-
-# 📚 Organiza por personagem e ordem cronológica
 df.sort_values(["Name", "DataHora"], inplace=True)
-
-# Crie uma coluna auxiliar com DataHora no fuso BRT
 df["DataHora_BRT"] = df["DataHora"].dt.tz_convert("America/Sao_Paulo")
 
-# ===============================================================
-# 🕓 VARIÁVEIS GLOBAIS DE TEMPO E PERÍODOS DE REFERÊNCIA
-# ---------------------------------------------------------------
-# Define os períodos usados nas comparações:
-# • Hoje (início e fim)
-# • Início do mês e do ano
-# • Primeiro e último registro disponíveis no dataset
-# ===============================================================
-
-agora = df["DataHora"].max()  # 🕒 Último timestamp registrado no CSV
-brt = pytz.timezone("America/Sao_Paulo")  # Fuso horário local
-
-# 📆 Intervalo de hoje no horário de Brasília
+agora = df["DataHora"].max()
+brt = pytz.timezone("America/Sao_Paulo")
 inicio_dia, fim_dia = get_intervalo_dia_local(agora)
-
-# 📅 Início do mês e do ano com base no menor timestamp disponível no mês/ano
-agora_brt = agora.tz_convert("America/Sao_Paulo")
+agora_brt = agora.tz_convert(brt)
 inicio_mes = df[df["DataHora_BRT"].dt.month == agora_brt.month]["DataHora"].min()
 if pd.isna(inicio_mes):
-    # fallback: início do mês no fuso BRT convertido para UTC
     inicio_mes = agora_brt.replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.UTC)
 inicio_ano = df[df["DataHora_BRT"].dt.year == agora_brt.year]["DataHora"].min()
 if pd.isna(inicio_ano):
     inicio_ano = agora_brt.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.UTC)
 
-# 🔍 Primeira e última data disponíveis na base
 primeiro_registro = df["DataHora"].min()
 ultimo_registro = agora
+
 # ===============================================================
-# ⚙️ CONFIGURAÇÃO DO LAYOUT E TÍTULO PRINCIPAL
-# ---------------------------------------------------------------
-# Define a aparência da página e exibe o título com:
-# • Período atual do dia (BRT)
-# • Data/hora da última atualização do CSV
+# 🏆 TÍTULO E CONTEXTO
 # ===============================================================
 
 st.set_page_config(page_title="TOP 100 XP Elysian", layout="wide")
-
-# 🎯 Título com período e última atualização
 inicio_fmt = inicio_dia.astimezone(brt).strftime('%d/%m %H:%M')
 fim_fmt = fim_dia.astimezone(brt).strftime('%d/%m %H:%M')
 ultimo_fmt = ultimo_registro.astimezone(brt).strftime('%d/%m %H:%M:%S')
 
 st.markdown(f"""
-# 🏆 TOP 100 XP Elysian  
+# 🏆 TOP 100 XP Elysian
 <small>
-📅 <b>Período do dia:</b> {inicio_fmt} → {fim_fmt} (horário local)  
+📅 <b>Período do dia:</b> {inicio_fmt} → {fim_fmt}  
 📌 <b>Última atualização:</b> <span style='color:green'>{ultimo_fmt}</span>
 </small>
 """, unsafe_allow_html=True)
 
 # ===============================================================
-# 🧭 SIDEBAR DE CONTEXTO E INSTRUÇÕES
-# ---------------------------------------------------------------
-# Mostra informações sobre a ferramenta, instruções de uso
-# e informações técnicas do painel na lateral esquerda
-# ===============================================================
-
-with st.sidebar:
-    
-    # 📌 Formata a última atualização no horário de Brasília
-    brt = pytz.timezone("America/Sao_Paulo")
-    ultimo_fmt_sidebar = ultimo_registro.astimezone(brt).strftime('%d/%m/%Y %H:%M:%S')
-
-    st.markdown(f"""
-    Este painel mostra a evolução do TOP 100 do servidor **Elysian** no Rubinot.
-    
-    • Última atualização: **{ultimo_fmt_sidebar}**  
-    • Variação de XP, Level e Rank (Dia, Semana, Mês, Ano)
-    
-    **Dica:** 
-    use o seletor de personagem para visualizar a evolução detalhada ao longo do tempo.
-
-    Doações são bem-vindas para manter o painel atualizado!
-
-    👾 Desenvolvido por 👾: 
-    **Paladina Revoltada**
-    """)
-
-    st.markdown("---")
-
-
-# ===============================================================
-# 🧾 TABELA TOP 100 — EVOLUÇÃO E RANKING INTERATIVO
-# ---------------------------------------------------------------
-# Cria um DataFrame com:
-# • Último snapshot de cada personagem
-# • Variação de XP, Level e Rank (Dia, Semana, Mês, Ano)
-# • Tabela interativa com ícones e botão de download
+# 🧾 TABELA TOP 100
 # ===============================================================
 
 st.markdown("## 🧾 <b>TOP 100 Elysian</b>", unsafe_allow_html=True)
-
-# 🔼 Emojis visuais para variação
-def seta_emoji(valor):
-    if valor > 0:
-        return f"🔼 {valor}"
-    elif valor < 0:
-        return f"🔽 {abs(valor)}"
-    return "➖"
-
-# 🔍 Lista de nomes presentes no top 100 mais recente
 ultimo_snapshot = df[df["DataHora"] == df["DataHora"].max()]
-nomes_top100_atuais = (
-    ultimo_snapshot.sort_values("Rank")
-                   .head(100)["Name"]
-                   .unique()
-)
+nomes_top100_atuais = ultimo_snapshot.sort_values("Rank").head(100)["Name"].unique()
 
-# 🧠 Calcula resumo para cada personagem que ainda está no top 100
 resumo = []
 for nome in nomes_top100_atuais:
     registros = df[df["Name"] == nome].sort_values("DataHora")
@@ -228,7 +136,7 @@ for nome in nomes_top100_atuais:
         "XP Ano": calcular_delta(df, nome, "Points", inicio_ano, agora),
     })
 
-# 📊 Exibição e exportação
+# 📊 Exibição e download
 df_resumo = pd.DataFrame(resumo).sort_values("Rank Atual")
 st.dataframe(df_resumo, use_container_width=True, hide_index=True)
 
@@ -240,41 +148,26 @@ st.download_button(
 )
 
 # ===============================================================
-# 📋 EVOLUÇÃO DO PERSONAGEM POR PERÍODO (ACUMULADO ATÉ O DIA)
-# ---------------------------------------------------------------
-
-from datetime import datetime, timedelta, time, date  # 🔧 GARANTA que essa linha está no topo
+# 📋 EVOLUÇÃO INDIVIDUAL POR DIA
+# ===============================================================
 
 st.markdown("---")
 st.header("📋 Evolução do Personagem por Período")
 
-# 🎯 Seletor de personagem
 personagem = st.selectbox("👤 Escolha o personagem:", df["Name"].unique())
 df_p = df[df["Name"] == personagem].copy().sort_values("DataHora")
-
-# 📅 Datas disponíveis desse personagem
 dias_disponiveis = df_p["DataHora_BRT"].dt.date.unique()
-data_dia = st.selectbox(
-    "📅 Escolha o dia para análise:",
-    sorted(dias_disponiveis),
-    index=len(dias_disponiveis) - 1  # padrão: último dia com registro
-)
+data_dia = st.selectbox("📅 Escolha o dia:", sorted(dias_disponiveis), index=len(dias_disponiveis) - 1)
 
-# 🌎 Timezone e marca de corte
-brt = pytz.timezone("America/Sao_Paulo")
 fim_do_dia = brt.localize(datetime.combine(data_dia, time(23, 59, 59))).astimezone(pytz.UTC)
-
-# 📅 Períodos construídos até o fim do dia escolhido
 inicio_dia = brt.localize(datetime.combine(data_dia, time(0, 0))).astimezone(pytz.UTC)
 inicio_semana = brt.localize(datetime.combine(data_dia - timedelta(days=data_dia.weekday()), time(0, 0))).astimezone(pytz.UTC)
 inicio_mes = brt.localize(datetime.combine(date(data_dia.year, data_dia.month, 1), time(0, 0))).astimezone(pytz.UTC)
 
-fim_dia = fim_semana = fim_mes = fim_do_dia  # mesmo fim para todos
+fim_dia = fim_semana = fim_mes = fim_do_dia
 
-# 🔁 Função para calcular e formatar os resultados
 def evolucao_formatada(df_p, inicio, fim):
     hist = df_p[(df_p["DataHora"] >= inicio) & (df_p["DataHora"] <= fim)].sort_values("DataHora")
-
     if len(hist) < 2:
         ultimo = df_p.iloc[-1] if not df_p.empty else None
         lvl_str = f"{int(ultimo['Level'])} ➖" if ultimo is not None else "-"
@@ -289,38 +182,33 @@ def evolucao_formatada(df_p, inicio, fim):
 
     rank_ini = int(hist.iloc[0]["Rank"])
     rank_fim = int(hist.iloc[-1]["Rank"])
-    rank_diff = rank_ini - rank_fim  # menor = melhor
+    rank_diff = rank_ini - rank_fim
     rank_str = f"{rank_ini} {'▲' if rank_diff > 0 else '▼' if rank_diff < 0 else '➖'} {abs(rank_diff)}" if rank_diff != 0 else f"{rank_ini} ➖"
 
     xp_gained = int(hist.iloc[-1]["Points"]) - int(hist.iloc[0]["Points"])
     xp_str = f"{xp_gained:,.0f}".replace(",", ".")
     return lvl_str, rank_str, xp_str
 
-# 🧠 Calcula os três blocos
 lvl_dia, rank_dia, xp_dia = evolucao_formatada(df_p, inicio_dia, fim_dia)
 lvl_sem, rank_sem, xp_sem = evolucao_formatada(df_p, inicio_semana, fim_semana)
 lvl_mes, rank_mes, xp_mes = evolucao_formatada(df_p, inicio_mes, fim_mes)
 
-# 📄 DataFrame formatado
 df_formatado = pd.DataFrame([
-    {"Período": "Dia", "Level Inicial": lvl_dia, "Rank Inicial": rank_dia, "XP Ganha": xp_dia},
-    {"Período": "Semana (até dia)", "Level Inicial": lvl_sem, "Rank Inicial": rank_sem, "XP Ganha": xp_sem},
-    {"Período": "Mês (até dia)", "Level Inicial": lvl_mes, "Rank Inicial": rank_mes, "XP Ganha": xp_mes},
+    {"Período": "Dia", "Level": lvl_dia, "Rank": rank_dia, "XP Ganha": xp_dia},
+    {"Período": "Semana (até dia)", "Level": lvl_sem, "Rank": rank_sem, "XP Ganha": xp_sem},
+    {"Período": "Mês (até dia)", "Level": lvl_mes, "Rank": rank_mes, "XP Ganha": xp_mes},
 ])
 
-# 🎨 Exibição
 st.markdown("### 📈 Progresso Consolidado")
 st.dataframe(df_formatado, use_container_width=True, hide_index=True)
 
-# 💾 Download
-csv_export = df_formatado.to_csv(index=False).encode("utf-8")
 st.download_button(
     "⬇️ Baixar resumo consolidado",
-    data=csv_export,
+    data=df_formatado.to_csv(index=False).encode("utf-8"),
     file_name=f"{personagem}_resumo_periodos.csv",
     mime="text/csv"
 )
-# 📎 Rodapé com períodos considerados
+
 inicio_fmt = inicio_dia.astimezone(brt).strftime('%d/%m %H:%M')
 fim_fmt = fim_dia.astimezone(brt).strftime('%d/%m %H:%M')
 primeiro_fmt = primeiro_registro.astimezone(brt).strftime('%d/%m %H:%M')
@@ -328,5 +216,5 @@ ultimo_fmt = ultimo_registro.astimezone(brt).strftime('%d/%m %H:%M')
 
 st.markdown("---")
 st.caption("📅 <b>Períodos considerados:</b>", unsafe_allow_html=True)
-st.caption(f"• <span style='color:green'>XP Dia:</span> {inicio_fmt} → {fim_fmt} (horário local)", unsafe_allow_html=True)
+st.caption(f"• <span style='color:green'>XP Dia:</span> {inicio_fmt} → {fim_fmt}", unsafe_allow_html=True)
 st.caption(f"• XP Semana, Mês e Ano: {primeiro_fmt} → {ultimo_fmt}", unsafe_allow_html=True)
