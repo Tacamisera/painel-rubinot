@@ -11,6 +11,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta, time
 import pytz
+import os
 
 # ⏰ Retorna o início e o fim do dia no fuso horário informado
 def get_intervalo_dia_local(agora_utc, fuso="America/Sao_Paulo"):
@@ -53,6 +54,17 @@ except Exception as e:
     st.error(f"❌ Erro ao carregar 'top100.csv': {e}")
     st.stop()
 
+# 🔄 Verifica se o arquivo foi atualizado fora do app
+caminho_csv = "top100.csv"
+ultima_modif = os.path.getmtime(caminho_csv)
+
+if "ultima_modif_salva" not in st.session_state:
+    st.session_state["ultima_modif_salva"] = ultima_modif
+elif st.session_state["ultima_modif_salva"] != ultima_modif:
+    st.session_state["ultima_modif_salva"] = ultima_modif
+    st.rerun()
+
+# 🧼 Validação de conteúdo do arquivo
 if df.empty or df["DataHora"].isna().all():
     st.warning("📭 O arquivo está vazio ou sem datas válidas.")
     st.stop()
@@ -182,9 +194,17 @@ def seta_emoji(valor):
         return f"🔽 {abs(valor)}"
     return "➖"
 
-# 🧠 Calcula resumo para cada personagem
+# 🔍 Lista de nomes presentes no top 100 mais recente
+ultimo_snapshot = df[df["DataHora"] == df["DataHora"].max()]
+nomes_top100_atuais = (
+    ultimo_snapshot.sort_values("Rank")
+                   .head(100)["Name"]
+                   .unique()
+)
+
+# 🧠 Calcula resumo para cada personagem que ainda está no top 100
 resumo = []
-for nome in df["Name"].unique():
+for nome in nomes_top100_atuais:
     registros = df[df["Name"] == nome].sort_values("DataHora")
     if registros.empty:
         continue
@@ -202,7 +222,7 @@ for nome in df["Name"].unique():
         "XP Total": int(ultimo["Points"]),
         "XP Dia": delta_xp_dia,
         "Δ Level (dia)": seta_emoji(delta_lvl),
-        "Δ Rank (7d)": seta_emoji(-delta_rank),  # Rank menor é melhor
+        "Δ Rank (7d)": seta_emoji(-delta_rank),
         "XP Semana": calcular_delta(df, nome, "Points", agora - timedelta(days=7), agora),
         "XP Mês": calcular_delta(df, nome, "Points", inicio_mes, agora),
         "XP Ano": calcular_delta(df, nome, "Points", inicio_ano, agora),
