@@ -8,14 +8,7 @@ from datetime import datetime, timedelta, time, date
 import pytz
 import os
 
-# Tentativa de importar autorefresh com fallback
-try:
-    from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=600000, limit=None, key="refresh")
-except ImportError:
-    st.warning("🔄 Autorefresh desabilitado (streamlit-autorefresh não instalado). Para habilitar, use: pip install streamlit-autorefresh")
 
-# ⏰ Intervalo do dia local
 
 def get_intervalo_dia_local(agora_utc, fuso="America/Sao_Paulo"):
     brt = pytz.timezone(fuso)
