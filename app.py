@@ -9,7 +9,6 @@ import pytz
 import os
 
 
-
 def get_intervalo_dia_local(agora_utc, fuso="America/Sao_Paulo"):
     brt = pytz.timezone(fuso)
     hoje_brt = agora_utc.astimezone(brt).date()
@@ -34,6 +33,11 @@ def seta_emoji(valor):
     elif valor < 0:
         return f"🔽 {abs(valor)}"
     return "➖"
+
+# 🗓 Início da semana (segunda-feira)
+def get_inicio_semana(agora_brt):
+    inicio_semana_brt = datetime.combine(agora_brt.date() - timedelta(days=agora_brt.weekday()), time(0, 0))
+    return pytz.timezone("America/Sao_Paulo").localize(inicio_semana_brt).astimezone(pytz.UTC)
 
 # ===============================================================
 # 📂 CARREGAMENTO E PRÉ-PROCESSAMENTO
@@ -75,6 +79,7 @@ if pd.isna(inicio_mes):
 inicio_ano = df[df["DataHora_BRT"].dt.year == agora_brt.year]["DataHora"].min()
 if pd.isna(inicio_ano):
     inicio_ano = agora_brt.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.UTC)
+inicio_semana = get_inicio_semana(agora_brt)
 
 primeiro_registro = df["DataHora"].min()
 ultimo_registro = agora
@@ -124,7 +129,7 @@ for nome in nomes_top100_atuais:
         "XP Dia": delta_xp_dia,
         "Δ Level (dia)": seta_emoji(delta_lvl),
         "Δ Rank (7d)": seta_emoji(-delta_rank),
-        "XP Semana": calcular_delta(df, nome, "Points", agora - timedelta(days=7), agora),
+        "XP Semana": calcular_delta(df, nome, "Points", inicio_semana, agora),
         "XP Mês": calcular_delta(df, nome, "Points", inicio_mes, agora),
         "XP Ano": calcular_delta(df, nome, "Points", inicio_ano, agora),
     })
