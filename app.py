@@ -42,20 +42,20 @@ def get_inicio_semana(agora_brt):
 # ===============================================================
 # 📂 CARREGAMENTO E PRÉ-PROCESSAMENTO
 # ===============================================================
+URL_CSV = "https://raw.githubusercontent.com/Tacamisera/painel-rubinot/refs/heads/main/top100.csv"
 
-try:
-    df = pd.read_csv("top100.csv", parse_dates=["DataHora"])
-except Exception as e:
-    st.error(f"❌ Erro ao carregar 'top100.csv': {e}")
-    st.stop()
+@st.cache_data(ttl=600)
+def carregar_csv():
+    try:
+        return pd.read_csv(URL_CSV, parse_dates=["DataHora"])
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar CSV remoto: {e}")
+        return pd.DataFrame()
 
-caminho_csv = "top100.csv"
-ultima_modif = os.path.getmtime(caminho_csv)
-if "ultima_modif_salva" not in st.session_state:
-    st.session_state["ultima_modif_salva"] = ultima_modif
-elif st.session_state["ultima_modif_salva"] != ultima_modif:
-    st.session_state["ultima_modif_salva"] = ultima_modif
-    st.rerun()
+if st.button("🔄 Atualizar dados"):
+    st.experimental_rerun()
+
+df = carregar_csv()
 
 if df.empty or df["DataHora"].isna().all():
     st.warning("📭 O arquivo está vazio ou sem datas válidas.")
@@ -68,6 +68,8 @@ df["Points"] = pd.to_numeric(df["Points"], errors="coerce")
 df.dropna(subset=["DataHora"], inplace=True)
 df.sort_values(["Name", "DataHora"], inplace=True)
 df["DataHora_BRT"] = df["DataHora"].dt.tz_convert("America/Sao_Paulo")
+# ===============================================================
+# 📊 CÁLCULOS E PERÍODOS
 
 agora = df["DataHora"].max()
 brt = pytz.timezone("America/Sao_Paulo")
