@@ -53,7 +53,7 @@ def carregar_csv():
         return pd.DataFrame()
 
 if st.button("🔄 Atualizar dados"):
-    st.experimental_rerun()
+    st.rerun()
 
 df = carregar_csv()
 
