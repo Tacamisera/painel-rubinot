@@ -44,7 +44,7 @@ def get_inicio_semana(agora_brt):
 # ===============================================================
 # 📂 CARREGAMENTO E PRÉ-PROCESSAMENTO
 # ===============================================================
-URL_CSV = "https://raw.githubusercontent.com/Tacamisera/painel-rubinot/refs/heads/main/top100.csv"
+URL_CSV = "https://raw.githubusercontent.com/Tacamisera/painel-rubinot/refs/heads/main/csv/top100.csv"
 
 @st.cache_data(ttl=600, show_spinner="Carregando dados do GitHub...")
 def carregar_csv_remoto():
