@@ -41,6 +41,9 @@ def get_inicio_semana(agora_brt):
     inicio_semana_brt = datetime.combine(agora_brt.date() - timedelta(days=agora_brt.weekday()), time(0, 0))
     return pytz.timezone("America/Sao_Paulo").localize(inicio_semana_brt).astimezone(pytz.UTC)
 
+def medalha_emoji(pos):
+    return {1: "🥇", 2: "🥈", 3: "🥉"}.get(pos, "")
+
 # ===============================================================
 # 📂 CARREGAMENTO E PRÉ-PROCESSAMENTO
 # ===============================================================
@@ -82,7 +85,8 @@ else:
     df = carregar_csv_remoto()
 
 if st.sidebar.button("🔄 Atualizar dados"):
-    st.experimental_rerun()
+    st.cache_data.clear()
+    st.rerun()
 
 if df.empty or df["DataHora"].isna().all():
     st.warning("📟 O arquivo está vazio ou sem datas válidas.")
@@ -132,6 +136,8 @@ st.markdown(f"""
 </small>
 """, unsafe_allow_html=True)
 
+# ... (restante do código permanece igual)
+
 # ===============================================================
 # 🧾 TABELA TOP 100
 
@@ -165,14 +171,18 @@ for nome in nomes_top100_atuais:
     })
 
 df_resumo = pd.DataFrame(resumo).sort_values("Rank Atual")
-st.dataframe(df_resumo, use_container_width=True, hide_index=True)
 
-st.download_button(
-    "⬇️ Baixar tabela TOP 100",
-    data=df_resumo.to_csv(index=False).encode("utf-8"),
-    file_name="top100_elysian.csv",
-    mime="text/csv"
-)
+# Formatando colunas numéricas com separador de milhares (ponto) e sem casas decimais
+def formatar_numeros(x):
+    if isinstance(x, int):
+        return f"{x:,}".replace(",", ".")
+    return x
+
+df_resumo_formatado = df_resumo.copy()
+for col in ["Rank Atual", "Level", "XP Total", "XP Dia", "XP Semana", "XP Mês", "XP Ano"]:
+    df_resumo_formatado[col] = df_resumo_formatado[col].apply(formatar_numeros)
+
+st.dataframe(df_resumo_formatado, use_container_width=True, hide_index=True)
 
 # ===============================================================
 # 📅 VISUALIZAÇÃO HISTÓRICA TOP 100
@@ -181,7 +191,15 @@ st.markdown("---")
 st.header("📅 TOP 100 Histórico")
 
 datas_disponiveis = df["DataHora_BRT"].dt.date.unique()
-data_selecionada = st.selectbox("📅 Escolha a data:", sorted(datas_disponiveis), index=len(datas_disponiveis) - 1, key="historico_data")
+data_min = min(datas_disponiveis)
+data_max = max(datas_disponiveis)
+data_selecionada = st.date_input(
+    "📅 Escolha a data:",
+    value=data_max,
+    min_value=data_min,
+    max_value=data_max,
+    key="historico_data"
+)
 
 fim_do_dia = brt.localize(datetime.combine(data_selecionada, time(23, 59, 59))).astimezone(pytz.UTC)
 inicio_do_dia = brt.localize(datetime.combine(data_selecionada, time(0, 0))).astimezone(pytz.UTC)
@@ -231,8 +249,14 @@ for nome in nomes_top100_atuais_hist:
 
 df_resumo_hist = pd.DataFrame(resumo_hist).sort_values("Rank Atual")
 
+# Formatar números na tabela histórica
+df_resumo_hist_formatado = df_resumo_hist.copy()
+for col in ["Rank Atual", "Level", "XP Total", "XP Dia", "XP Semana", "XP Mês", "XP Ano"]:
+    df_resumo_hist_formatado[col] = df_resumo_hist_formatado[col].apply(formatar_numeros)
+
 st.markdown(f"### 📊 TOP 100 em {data_selecionada.strftime('%d/%m/%Y')}")
-st.dataframe(df_resumo_hist, use_container_width=True, hide_index=True)
+st.dataframe(df_resumo_hist_formatado, use_container_width=True, hide_index=True)
+
 
 # ===============================================================
 # 🏆 TOP 10 RANKINGS (DIA/SEMANA)
@@ -256,7 +280,7 @@ with col1:
         delta_rank = calcular_delta(grouped.get_group(player["Name"]), "Rank", inicio_dia, fim_dia)
 
         top10_dia.append({
-            "Pos": f"#{pos}",
+            "Pos": f"{medalha_emoji(pos)} #{pos}",
             "Nome": player["Name"],
             "Level": f"{int(player['Level'])} ({seta_emoji(delta_lvl)})",
             "XP Ganho": f"{xp_dia:,}".replace(",", "."),
@@ -279,7 +303,7 @@ with col2:
         delta_rank = calcular_delta(grouped.get_group(player["Name"]), "Rank", inicio_semana, agora)
 
         top10_semana.append({
-            "Pos": f"#{pos}",
+            "Pos": f"{medalha_emoji(pos)} #{pos}",
             "Nome": player["Name"],
             "Level": f"{int(player['Level'])} ({seta_emoji(delta_lvl)})",
             "XP Ganho": f"{xp_semana:,}".replace(",", "."),
