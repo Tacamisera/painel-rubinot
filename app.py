@@ -148,73 +148,99 @@ st.download_button(
 )
 
 # ===============================================================
-# 📋 EVOLUÇÃO INDIVIDUAL POR DIA
+# 📅 VISUALIZAÇÃO HISTÓRICA TOP 100
 # ===============================================================
 
 st.markdown("---")
-st.header("📋 Evolução do Personagem por Período")
+st.header("📅 TOP 100 Histórico")
 
-personagem = st.selectbox("👤 Escolha o personagem:", df["Name"].unique())
-df_p = df[df["Name"] == personagem].copy().sort_values("DataHora")
-dias_disponiveis = df_p["DataHora_BRT"].dt.date.unique()
-data_dia = st.selectbox("📅 Escolha o dia:", sorted(dias_disponiveis), index=len(dias_disponiveis) - 1)
+datas_disponiveis = df["DataHora_BRT"].dt.date.unique()
+data_selecionada = st.selectbox("📅 Escolha a data:", sorted(datas_disponiveis), index=len(datas_disponiveis) - 1)
 
-fim_do_dia = brt.localize(datetime.combine(data_dia, time(23, 59, 59))).astimezone(pytz.UTC)
-inicio_dia = brt.localize(datetime.combine(data_dia, time(0, 0))).astimezone(pytz.UTC)
-inicio_semana = brt.localize(datetime.combine(data_dia - timedelta(days=data_dia.weekday()), time(0, 0))).astimezone(pytz.UTC)
-inicio_mes = brt.localize(datetime.combine(date(data_dia.year, data_dia.month, 1), time(0, 0))).astimezone(pytz.UTC)
+fim_do_dia = brt.localize(datetime.combine(data_selecionada, time(23, 59, 59))).astimezone(pytz.UTC)
+inicio_dia = brt.localize(datetime.combine(data_selecionada, time(0, 0))).astimezone(pytz.UTC)
 
-fim_dia = fim_semana = fim_mes = fim_do_dia
+# Cálculo dos inícios de período para a data selecionada
+inicio_semana_sel = get_inicio_semana(fim_do_dia.astimezone(brt))
+inicio_mes_sel = fim_do_dia.astimezone(brt).replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.UTC)
 
-def evolucao_formatada(df_p, inicio, fim):
-    hist = df_p[(df_p["DataHora"] >= inicio) & (df_p["DataHora"] <= fim)].sort_values("DataHora")
-    if len(hist) < 2:
-        ultimo = df_p.iloc[-1] if not df_p.empty else None
-        lvl_str = f"{int(ultimo['Level'])} ➖" if ultimo is not None else "-"
-        rank_str = f"{int(ultimo['Rank'])} ➖" if ultimo is not None else "-"
-        xp_str = "0"
-        return lvl_str, rank_str, xp_str
+# Snapshot e cálculos para a data selecionada
+df_dia = df[df["DataHora"] <= fim_do_dia].copy()
+ultimo_snapshot_dia = df_dia[df_dia["DataHora"] == df_dia["DataHora"].max()]
+top100_historico = []
 
-    lvl_ini = int(hist.iloc[0]["Level"])
-    lvl_fim = int(hist.iloc[-1]["Level"])
-    lvl_diff = lvl_fim - lvl_ini
-    lvl_str = f"{lvl_ini} {'▲' if lvl_diff > 0 else '▼' if lvl_diff < 0 else '➖'} {abs(lvl_diff)}" if lvl_diff != 0 else f"{lvl_ini} ➖"
+for _, player in ultimo_snapshot_dia.sort_values("Rank").head(100).iterrows():
+    xp_dia = calcular_delta(df, player["Name"], "Points", inicio_dia, fim_do_dia)
+    xp_semana = calcular_delta(df, player["Name"], "Points", inicio_semana_sel, fim_do_dia)
+    xp_mes = calcular_delta(df, player["Name"], "Points", inicio_mes_sel, fim_do_dia)
+    delta_lvl = calcular_delta(df, player["Name"], "Level", inicio_dia, fim_do_dia)
+    
+    top100_historico.append({
+        "Rank": int(player["Rank"]),
+        "Nome": player["Name"],
+        "Vocação": player["Vocation"],
+        "Level": f"{int(player['Level'])} ({seta_emoji(delta_lvl)})",
+        "XP Dia": f"{xp_dia:,}".replace(",", "."),
+        "XP Semana": f"{xp_semana:,}".replace(",", "."),
+        "XP Mês": f"{xp_mes:,}".replace(",", ".")
+    })
 
-    rank_ini = int(hist.iloc[0]["Rank"])
-    rank_fim = int(hist.iloc[-1]["Rank"])
-    rank_diff = rank_ini - rank_fim
-    rank_str = f"{rank_ini} {'▲' if rank_diff > 0 else '▼' if rank_diff < 0 else '➖'} {abs(rank_diff)}" if rank_diff != 0 else f"{rank_ini} ➖"
+st.markdown(f"### 📊 TOP 100 em {data_selecionada.strftime('%d/%m/%Y')}")
+st.dataframe(pd.DataFrame(top100_historico), use_container_width=True, hide_index=True)
 
-    xp_gained = int(hist.iloc[-1]["Points"]) - int(hist.iloc[0]["Points"])
-    xp_str = f"{xp_gained:,.0f}".replace(",", ".")
-    return lvl_str, rank_str, xp_str
-
-lvl_dia, rank_dia, xp_dia = evolucao_formatada(df_p, inicio_dia, fim_dia)
-lvl_sem, rank_sem, xp_sem = evolucao_formatada(df_p, inicio_semana, fim_semana)
-lvl_mes, rank_mes, xp_mes = evolucao_formatada(df_p, inicio_mes, fim_mes)
-
-df_formatado = pd.DataFrame([
-    {"Período": "Dia", "Level": lvl_dia, "Rank": rank_dia, "XP Ganha": xp_dia},
-    {"Período": "Semana (até dia)", "Level": lvl_sem, "Rank": rank_sem, "XP Ganha": xp_sem},
-    {"Período": "Mês (até dia)", "Level": lvl_mes, "Rank": rank_mes, "XP Ganha": xp_mes},
-])
-
-st.markdown("### 📈 Progresso Consolidado")
-st.dataframe(df_formatado, use_container_width=True, hide_index=True)
-
-st.download_button(
-    "⬇️ Baixar resumo consolidado",
-    data=df_formatado.to_csv(index=False).encode("utf-8"),
-    file_name=f"{personagem}_resumo_periodos.csv",
-    mime="text/csv"
-)
-
-inicio_fmt = inicio_dia.astimezone(brt).strftime('%d/%m %H:%M')
-fim_fmt = fim_dia.astimezone(brt).strftime('%d/%m %H:%M')
-primeiro_fmt = primeiro_registro.astimezone(brt).strftime('%d/%m %H:%M')
-ultimo_fmt = ultimo_registro.astimezone(brt).strftime('%d/%m %H:%M')
+# ===============================================================
+# 🏆 TOP 10 RANKINGS (DIA/SEMANA)
+# ===============================================================
 
 st.markdown("---")
-st.caption("📅 <b>Períodos considerados:</b>", unsafe_allow_html=True)
-st.caption(f"• <span style='color:green'>XP Dia:</span> {inicio_fmt} → {fim_fmt}", unsafe_allow_html=True)
-st.caption(f"• XP Semana, Mês e Ano: {primeiro_fmt} → {ultimo_fmt}", unsafe_allow_html=True)
+st.header("🏆 TOP 10 Rankings")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### 📈 Top 10 XP do Dia")
+    top10_dia = []
+    # Calcula XP do dia para todos os players
+    xp_players_dia = []
+    for _, player in ultimo_snapshot.iterrows():
+        xp_dia = calcular_delta(df, player["Name"], "Points", inicio_dia, fim_dia)
+        if xp_dia > 0:  # Só inclui players que ganharam XP
+            xp_players_dia.append((xp_dia, player))
+    
+    # Ordena por XP ganho e pega top 10
+    for xp_dia, player in sorted(xp_players_dia, key=lambda x: x[0], reverse=True)[:10]:
+        delta_lvl = calcular_delta(df, player["Name"], "Level", inicio_dia, fim_dia)
+        delta_rank = calcular_delta(df, player["Name"], "Rank", inicio_dia, fim_dia)
+        
+        top10_dia.append({
+            "Nome": player["Name"],
+            "Level": f"{int(player['Level'])} ({seta_emoji(delta_lvl)})",
+            "XP Ganho": f"{xp_dia:,}".replace(",", "."),
+            "Rank": f"{int(player['Rank'])} ({seta_emoji(-delta_rank)})"
+        })
+    
+    st.table(pd.DataFrame(top10_dia))
+
+with col2:
+    st.markdown("### 📈 Top 10 XP da Semana")
+    top10_semana = []
+    # Calcula XP da semana para todos os players
+    xp_players_semana = []
+    for _, player in ultimo_snapshot.iterrows():
+        xp_semana = calcular_delta(df, player["Name"], "Points", inicio_semana, agora)
+        if xp_semana > 0:  # Só inclui players que ganharam XP
+            xp_players_semana.append((xp_semana, player))
+    
+    # Ordena por XP ganho e pega top 10
+    for xp_semana, player in sorted(xp_players_semana, key=lambda x: x[0], reverse=True)[:10]:
+        delta_lvl = calcular_delta(df, player["Name"], "Level", inicio_semana, agora)
+        delta_rank = calcular_delta(df, player["Name"], "Rank", inicio_semana, agora)
+        
+        top10_semana.append({
+            "Nome": player["Name"],
+            "Level": f"{int(player['Level'])} ({seta_emoji(delta_lvl)})",
+            "XP Ganho": f"{xp_semana:,}".replace(",", "."),
+            "Rank": f"{int(player['Rank'])} ({seta_emoji(-delta_rank)})"
+        })
+    
+    st.table(pd.DataFrame(top10_semana))
