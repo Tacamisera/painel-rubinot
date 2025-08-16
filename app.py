@@ -26,7 +26,9 @@ def get_intervalo_dia_local(agora_utc, fuso="America/Sao_Paulo"):
 
 def calcular_delta(df_filtrado, campo, inicio, fim):
     periodo = df_filtrado[(df_filtrado["DataHora"] >= inicio) & (df_filtrado["DataHora"] <= fim)]
-    if periodo.empty or len(periodo) == 1:
+    if periodo.empty:
+        return 0
+    if len(periodo) == 1:
         return 0
     return int(periodo.iloc[-1][campo]) - int(periodo.iloc[0][campo])
 
@@ -43,6 +45,81 @@ def get_inicio_semana(agora_brt):
 
 def medalha_emoji(pos):
     return {1: "🥇", 2: "🥈", 3: "🥉"}.get(pos, "")
+
+def process_historical_data(df, nome, registros, ultimo, inicio_do_dia, fim_do_dia, inicio_semana_hist, inicio_mes_hist, inicio_ano_hist):
+    """Process historical data for a player."""
+    try:
+        # Calculate daily changes
+        delta_lvl = calcular_delta(registros, "Level", inicio_do_dia, fim_do_dia)
+        delta_rank = calcular_delta(registros, "Rank", fim_do_dia - timedelta(days=7), fim_do_dia)
+        delta_xp_dia = calcular_delta(registros, "Points", inicio_do_dia, fim_do_dia)
+        
+        # Calculate period XP gains
+        xp_semana = calcular_delta(registros, "Points", inicio_semana_hist, fim_do_dia)
+        xp_mes = calcular_delta(registros, "Points", inicio_mes_hist, fim_do_dia)
+        xp_ano = calcular_delta(registros, "Points", inicio_ano_hist, fim_do_dia)
+        
+        return {
+            "Rank Atual": int(ultimo["Rank"]),
+            "Name": nome,
+            "Vocation": ultimo["Vocation"],
+            "Level": int(ultimo["Level"]),
+            "XP Total": int(ultimo["Points"]),
+            "XP Dia": delta_xp_dia,
+            "Δ Level (dia)": seta_emoji(delta_lvl),
+            "Δ Rank (7d)": seta_emoji(-delta_rank),
+            "XP Semana": xp_semana,
+            "XP Mês": xp_mes,
+            "XP Ano": xp_ano
+        }
+    except Exception as e:
+        # Return zero values in case of error
+        return {
+            "Rank Atual": 0,
+            "Name": nome,
+            "Vocation": "Unknown",
+            "Level": 0,
+            "XP Total": 0,
+            "XP Dia": 0,
+            "Δ Level (dia)": seta_emoji(0),
+            "Δ Rank (7d)": seta_emoji(0),
+            "XP Semana": 0,
+            "XP Mês": 0,
+            "XP Ano": 0
+        }
+
+def sort_dataframe(df, coluna_ordem, ordem_crescente=True):
+    """
+    Sort DataFrame by specified column while ensuring proper numeric sorting
+    """
+    df_temp = df.copy()
+    
+    # Remove formatting from numeric columns before sorting
+    colunas_numericas = ["Rank Atual", "Level", "XP Total", "XP Dia", "XP Semana", "XP Mês", "XP Ano"]
+    
+    for col in colunas_numericas:
+        if col in df_temp.columns:
+            # Convert formatted strings back to numbers
+            if df_temp[col].dtype == 'object':
+                df_temp[col] = df_temp[col].apply(lambda x: 
+                    int(str(x).replace('.', '')) if isinstance(x, str) else x)
+            
+            # Ensure numeric type
+            df_temp[col] = pd.to_numeric(df_temp[col], errors='coerce').fillna(0)
+    
+    # Sort the DataFrame
+    return df_temp.sort_values(by=coluna_ordem, ascending=ordem_crescente)
+
+def formatar_numeros(x):
+    """Format numbers as plain integers"""
+    try:
+        if pd.isna(x):
+            return "0"
+        if isinstance(x, (int, float)):
+            return f"{int(x)}"
+        return str(int(float(str(x).replace('.', ''))))
+    except:
+        return "0"
 
 # ===============================================================
 # 📂 CARREGAMENTO E PRÉ-PROCESSAMENTO
@@ -136,8 +213,6 @@ st.markdown(f"""
 </small>
 """, unsafe_allow_html=True)
 
-# ... (restante do código permanece igual)
-
 # ===============================================================
 # 🧾 TABELA TOP 100
 
@@ -170,19 +245,39 @@ for nome in nomes_top100_atuais:
         "XP Ano": calcular_delta(registros, "Points", inicio_ano, agora),
     })
 
-df_resumo = pd.DataFrame(resumo).sort_values("Rank Atual")
+# Create the DataFrame with numeric values
+df_resumo = pd.DataFrame(resumo)
 
-# Formatando colunas numéricas com separador de milhares (ponto) e sem casas decimais
-def formatar_numeros(x):
-    if isinstance(x, int):
-        return f"{x:,}".replace(",", ".")
-    return x
-
+# Sort before formatting
+df_resumo = sort_dataframe(df_resumo, "Rank Atual", True)
 df_resumo_formatado = df_resumo.copy()
 for col in ["Rank Atual", "Level", "XP Total", "XP Dia", "XP Semana", "XP Mês", "XP Ano"]:
     df_resumo_formatado[col] = df_resumo_formatado[col].apply(formatar_numeros)
 
-st.dataframe(df_resumo_formatado, use_container_width=True, hide_index=True)
+# Display with sortable columns
+st.dataframe(
+    df_resumo_formatado, 
+    use_container_width=True, 
+    hide_index=True,
+    column_config={
+        "XP Dia": st.column_config.Column(
+            "XP Dia",
+            help="Experience gained today"
+        ),
+        "XP Semana": st.column_config.Column(
+            "XP Semana",
+            help="Experience gained this week"
+        ),
+        "XP Mês": st.column_config.Column(
+            "XP Mês",
+            help="Experience gained this month"
+        ),
+        "XP Ano": st.column_config.Column(
+            "XP Ano",
+            help="Experience gained this year"
+        )
+    }
+)
 
 # ===============================================================
 # 📅 VISUALIZAÇÃO HISTÓRICA TOP 100
@@ -220,42 +315,58 @@ nomes_top100_atuais_hist = ultimo_snapshot_hist.sort_values("Rank").head(100).in
 grouped_hist = df_ate_dia.groupby("Name")
 
 resumo_hist = []
-
 for nome in nomes_top100_atuais_hist:
     registros = grouped_hist.get_group(nome)
     ultimo = ultimo_snapshot_hist.loc[nome]
+    
+    # Process player data using the new function
+    player_data = process_historical_data(
+        df,
+        nome,
+        registros,
+        ultimo,
+        inicio_do_dia,
+        fim_do_dia,
+        inicio_semana_hist,
+        inicio_mes_hist,
+        inicio_ano_hist
+    )
+    resumo_hist.append(player_data)
 
-    delta_lvl = calcular_delta(registros, "Level", inicio_do_dia, fim_do_dia)
-    delta_rank = calcular_delta(registros, "Rank", fim_do_dia - timedelta(days=7), fim_do_dia)
-    delta_xp_dia = calcular_delta(registros, "Points", inicio_do_dia, fim_do_dia)
+# Create DataFrame with numeric values
+df_resumo_hist = pd.DataFrame(resumo_hist)
 
-    xp_semana = calcular_delta(registros, "Points", inicio_semana_hist, fim_do_dia)
-    xp_mes = calcular_delta(registros, "Points", inicio_mes_hist, fim_do_dia)
-    xp_ano = calcular_delta(registros, "Points", inicio_ano_hist, fim_do_dia)
-
-    resumo_hist.append({
-        "Rank Atual": int(ultimo["Rank"]),
-        "Name": nome,
-        "Vocation": ultimo["Vocation"],
-        "Level": int(ultimo["Level"]),
-        "XP Total": int(ultimo["Points"]),
-        "XP Dia": delta_xp_dia,
-        "Δ Level (dia)": seta_emoji(delta_lvl),
-        "Δ Rank (7d)": seta_emoji(-delta_rank),
-        "XP Semana": xp_semana,
-        "XP Mês": xp_mes,
-        "XP Ano": xp_ano,
-    })
-
-df_resumo_hist = pd.DataFrame(resumo_hist).sort_values("Rank Atual")
-
-# Formatar números na tabela histórica
+# Add sorting controls
+df_resumo_hist = sort_dataframe(df_resumo_hist, "Rank Atual", True)
 df_resumo_hist_formatado = df_resumo_hist.copy()
 for col in ["Rank Atual", "Level", "XP Total", "XP Dia", "XP Semana", "XP Mês", "XP Ano"]:
     df_resumo_hist_formatado[col] = df_resumo_hist_formatado[col].apply(formatar_numeros)
 
+# Display with sortable columns
 st.markdown(f"### 📊 TOP 100 em {data_selecionada.strftime('%d/%m/%Y')}")
-st.dataframe(df_resumo_hist_formatado, use_container_width=True, hide_index=True)
+st.dataframe(
+    df_resumo_hist_formatado, 
+    use_container_width=True, 
+    hide_index=True,
+    column_config={
+        "XP Dia": st.column_config.Column(
+            "XP Dia",
+            help="Experience gained on selected day"
+        ),
+        "XP Semana": st.column_config.Column(
+            "XP Semana",
+            help="Experience gained that week"
+        ),
+        "XP Mês": st.column_config.Column(
+            "XP Mês",
+            help="Experience gained that month"
+        ),
+        "XP Ano": st.column_config.Column(
+            "XP Ano",
+            help="Experience gained that year"
+        )
+    }
+)
 
 
 # ===============================================================
