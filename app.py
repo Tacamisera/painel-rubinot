@@ -114,12 +114,14 @@ def formatar_numeros(x):
     """Format numbers as plain integers"""
     try:
         if pd.isna(x):
-            return "0"
-        if isinstance(x, (int, float)):
-            return f"{int(x)}"
-        return str(int(float(str(x).replace('.', ''))))
+            return 0
+        if isinstance(x, str):
+            # Remove any non-numeric characters except minus sign
+            clean_str = ''.join(c for c in x if c.isdigit() or c == '-')
+            return int(clean_str) if clean_str else 0
+        return int(x)
     except:
-        return "0"
+        return 0
 
 # ===============================================================
 # 📂 CARREGAMENTO E PRÉ-PROCESSAMENTO
@@ -260,21 +262,25 @@ st.dataframe(
     use_container_width=True, 
     hide_index=True,
     column_config={
-        "XP Dia": st.column_config.Column(
+        "XP Dia": st.column_config.NumberColumn(
             "XP Dia",
-            help="Experience gained today"
+            help="Experience gained today",
+            format="%d"
         ),
-        "XP Semana": st.column_config.Column(
+        "XP Semana": st.column_config.NumberColumn(
             "XP Semana",
-            help="Experience gained this week"
+            help="Experience gained this week",
+            format="%d"
         ),
-        "XP Mês": st.column_config.Column(
+        "XP Mês": st.column_config.NumberColumn(
             "XP Mês",
-            help="Experience gained this month"
+            help="Experience gained this month",
+            format="%d"
         ),
-        "XP Ano": st.column_config.Column(
+        "XP Ano": st.column_config.NumberColumn(
             "XP Ano",
-            help="Experience gained this year"
+            help="Experience gained this year",
+            format="%d"
         )
     }
 )
@@ -349,21 +355,25 @@ st.dataframe(
     use_container_width=True, 
     hide_index=True,
     column_config={
-        "XP Dia": st.column_config.Column(
+        "XP Dia": st.column_config.NumberColumn(
             "XP Dia",
-            help="Experience gained on selected day"
+            help="Experience gained on selected day",
+            format="%d"
         ),
-        "XP Semana": st.column_config.Column(
+        "XP Semana": st.column_config.NumberColumn(
             "XP Semana",
-            help="Experience gained that week"
+            help="Experience gained that week",
+            format="%d"
         ),
-        "XP Mês": st.column_config.Column(
+        "XP Mês": st.column_config.NumberColumn(
             "XP Mês",
-            help="Experience gained that month"
+            help="Experience gained that month",
+            format="%d"
         ),
-        "XP Ano": st.column_config.Column(
+        "XP Ano": st.column_config.NumberColumn(
             "XP Ano",
-            help="Experience gained that year"
+            help="Experience gained that year",
+            format="%d"
         )
     }
 )
