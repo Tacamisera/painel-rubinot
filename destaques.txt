@@ -1,0 +1,197 @@
+# -*- coding: utf-8 -*-
+# ===============================================================
+# 📣 DESTAQUES E RANKINGS AUTOMÁTICOS — BOT DO DISCORD
+# ===============================================================
+
+import pandas as pd
+import requests
+import pytz
+from datetime import datetime, timedelta
+import sys
+import io
+
+# Suporte a saída UTF-8 no console
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+# ===============================================================
+# 📦 CONFIGURAÇÕES INICIAIS
+# ===============================================================
+
+WEBHOOK_URL = "https://discord.com/api/webhooks/1389360028166914201/6xpSV5Rjo1SmreX4tbldKkf6DVlR4JOWKkASnXs4EO_M_NSQ4rDtXxI-qhbe8XzLa4nt"
+brt = pytz.timezone("America/Sao_Paulo")
+
+EMOJI_POR_VOCACAO = {
+    "Master Sorcerer": "🧙‍♂️",
+    "Elder Druid": "🧙‍♂️",
+    "Royal Paladin": "🏹",
+    "Elite Knight": "⚔️",
+    "Exalted Monk": "👊"
+}
+
+# ===============================================================
+# 🔧 FUNÇÕES AUXILIARES
+# ===============================================================
+
+def formatar_numero(numero):
+    return f"{numero:,}".replace(",", ".")
+
+def enviar_para_discord(msg):
+    print("Enviando para Discord:\n", msg)
+    try:
+        requests.post(WEBHOOK_URL, json={"content": msg})
+    except Exception as e:
+        print("Erro ao enviar mensagem para o Discord:", e)
+
+def formatar_hora_local(datahora):
+    if datahora.tzinfo is None:
+        datahora = datahora.tz_localize("UTC")
+    return datahora.astimezone(brt).strftime("%d/%m %H:%M")
+
+def mostrar_delta(valor):
+    return f"{valor:+}" if valor != 0 else "–"
+
+def emoji_por_vocacao(voc):
+    return EMOJI_POR_VOCACAO.get(voc, "👤")
+
+# ===============================================================
+# 🌟 DETECÇÃO DE DESTAQUES + ENTRADAS/SAÍDAS
+# ===============================================================
+
+def checar_destaques(df):
+    df = df.sort_values("DataHora")
+    mensagens = []
+
+    for nome, grupo in df.groupby("Name"):
+        ultimos = grupo.tail(2)
+        if len(ultimos) < 2:
+            continue
+
+        antes, depois = ultimos.iloc[0], ultimos.iloc[1]
+        lvl_ant, lvl_atu = int(antes.Level), int(depois.Level)
+        xp_ant, xp_atu = int(antes.Points), int(depois.Points)
+        rk_ant, rk_atu = int(antes.Rank), int(depois.Rank)
+        voc = depois.get("Vocation", "")
+        emoji = emoji_por_vocacao(voc)
+
+        delta_lvl = lvl_atu - lvl_ant
+        delta_rk = rk_ant - rk_atu
+
+        flecha_lvl = "▲" if delta_lvl > 0 else "▼" if delta_lvl < 0 else "➖"
+        flecha_rk = "▲" if delta_rk > 0 else "▼" if delta_rk < 0 else "➖"
+
+        if delta_lvl > 0:
+            mensagens.append(
+                f"{emoji} {nome} | Upou para o Level: {lvl_atu} (+{delta_lvl}) {flecha_lvl} | "
+                f"Rank: #{rk_atu} ({mostrar_delta(delta_rk)}) {flecha_rk}"
+            )
+        elif xp_atu < xp_ant:
+            xp_perdido = formatar_numero(xp_ant - xp_atu)
+            mensagens.append(
+                f"{emoji} {nome} |☠️ Foi de Base ☠️ e perdeu {xp_perdido} de XP | "
+                f"Level: {lvl_atu} ({mostrar_delta(delta_lvl)}) {flecha_lvl} | "
+                f"Rank: #{rk_atu} ({mostrar_delta(delta_rk)}) {flecha_rk}"
+            )
+
+    # Entradas e saídas do Top 100
+    primeiros = df.groupby("Name", sort=False).first()
+    ultimos = df.groupby("Name", sort=False).last()
+
+    nomes_antes = set(primeiros.index)
+    nomes_depois = set(ultimos.index)
+
+    for nome in sorted(nomes_depois - nomes_antes):
+        r = ultimos.loc[nome]
+        emoji = emoji_por_vocacao(r.get("Vocation", ""))
+        mensagens.append(f"📈 Entrou no Top 100!\n{emoji} {nome} | Level: {int(r.Level)} | Rank: #{int(r.Rank)}")
+
+    for nome in sorted(nomes_antes - nomes_depois):
+        r = primeiros.loc[nome]
+        emoji = emoji_por_vocacao(r.get("Vocation", ""))
+        mensagens.append(f"📉 Saiu do Top 100...\n{emoji} {nome} | Último Level: {int(r.Level)} | Rank: #{int(r.Rank)}")
+
+    for msg in mensagens:
+        enviar_para_discord(msg)
+
+# ===============================================================
+# 🏆 GERADOR DE RANKING
+# ===============================================================
+
+def gerar_ranking_top10(df, modo="diario"):
+    agora = datetime.now(brt)
+
+    if modo == "diario":
+        inicio = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        titulo = f"🏆 **TOP 10 XP DO DIA** — {agora.strftime('%d/%m')}"
+    elif modo == "semanal":
+        inicio = agora - timedelta(days=agora.weekday())
+        inicio = inicio.replace(hour=0, minute=0, second=0, microsecond=0)
+        titulo = f"🏆 **TOP 10 XP DA SEMANA** — até {agora.strftime('%d/%m')}"
+    elif modo == "mensal":
+        inicio = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        titulo = f"🏆 **TOP 10 XP DO MÊS** — {agora.strftime('%m/%Y')}"
+    else:
+        return
+
+    df_local = df.copy()
+    df_local["DataHora"] = pd.to_datetime(df_local["DataHora"], utc=True).dt.tz_convert(brt)
+    df_periodo = df_local[df_local["DataHora"] >= inicio]
+
+    if df_periodo.empty:
+        return
+
+    evolucoes = []
+    for nome, grupo in df_periodo.groupby("Name"):
+        grupo = grupo.sort_values("DataHora")
+        if len(grupo) < 2:
+            continue
+
+        ini, fim = grupo.iloc[0], grupo.iloc[-1]
+        ganho_xp = int(fim.Points) - int(ini.Points)
+
+        if ganho_xp > 0:
+            evolucoes.append({
+                "nome": nome,
+                "xp": ganho_xp,
+                "lvl_ini": int(ini.Level),
+                "lvl_fim": int(fim.Level),
+                "gain_lvl": int(fim.Level) - int(ini.Level),
+                "rk_ini": int(ini.Rank),
+                "rk_fim": int(fim.Rank),
+                "delta_rank": int(ini.Rank) - int(fim.Rank)
+            })
+
+    if not evolucoes:
+        return
+
+    top10 = sorted(evolucoes, key=lambda x: x["xp"], reverse=True)[:10]
+    linhas = [titulo]
+
+    for i, p in enumerate(top10, 1):
+        prefixo = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+        flecha_lvl = "▲" if p["gain_lvl"] > 0 else "—"
+        flecha_rank = "▲" if p["delta_rank"] > 0 else "▼" if p["delta_rank"] < 0 else "—"
+
+        linhas.append(
+            f"{prefixo} {p['nome']} | Level: {p['lvl_fim']} (+{p['gain_lvl']}) {flecha_lvl} | "
+            f"XP: +{formatar_numero(p['xp'])} | Rank: #{p['rk_fim']} ({p['delta_rank']:+}) {flecha_rank}"
+        )
+
+    enviar_para_discord("\n".join(linhas))
+
+# ===============================================================
+# 🚀 EXECUÇÃO PRINCIPAL
+# ===============================================================
+
+if __name__ == "__main__":
+    df = pd.read_csv("top100.csv", parse_dates=["DataHora"])
+    checar_destaques(df)
+
+    agora = datetime.now(brt)
+    if agora.hour == 23 and 45 <= agora.minute <= 59:
+        gerar_ranking_top10(df, modo="diario")
+
+        if agora.weekday() == 6:
+            gerar_ranking_top10(df, modo="semanal")
+
+        if (agora + timedelta(days=1)).month != agora.month:
+            gerar_ranking_top10(df, modo="mensal")
