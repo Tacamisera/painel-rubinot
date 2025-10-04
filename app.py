@@ -131,9 +131,25 @@ URL_CSV = "https://raw.githubusercontent.com/Tacamisera/painel-rubinot/refs/head
 @st.cache_data(ttl=600, show_spinner="Carregando dados do GitHub...")
 def carregar_csv_remoto():
     try:
-        df_remote = pd.read_csv(URL_CSV, parse_dates=["DataHora"])
+        df_remote = pd.read_csv(URL_CSV, encoding="utf-8", sep=",", on_bad_lines="skip")
+        
+        if "DataHora" not in df_remote.columns:
+            st.error("❌ Coluna 'DataHora' não encontrada no CSV remoto.")
+            return pd.DataFrame()
+        
+        df_remote["DataHora"] = pd.to_datetime(df_remote["DataHora"], errors="coerce", utc=True)
+        
+        for col in ["Level", "Rank", "Points"]:
+            if col in df_remote.columns:
+                df_remote[col] = pd.to_numeric(df_remote[col], errors="coerce")
+        
+        df_remote.dropna(subset=["DataHora"], inplace=True)
+        df_remote.sort_values(["Name", "DataHora"], inplace=True)
+        df_remote["DataHora_BRT"] = df_remote["DataHora"].dt.tz_convert("America/Sao_Paulo")
+        
         if df_remote.empty:
             st.warning("⚠️ O arquivo remoto está vazio.")
+        
         return df_remote
     except Exception as e:
         st.error(f"❌ Erro ao carregar CSV remoto: {e}")
@@ -142,7 +158,23 @@ def carregar_csv_remoto():
 @st.cache_data(ttl=600)
 def carregar_csv_local(arquivo):
     try:
-        return pd.read_csv(arquivo, parse_dates=["DataHora"])
+        df_local = pd.read_csv(arquivo, encoding="utf-8", sep=",", on_bad_lines="skip")
+        
+        if "DataHora" not in df_local.columns:
+            st.error("❌ Coluna 'DataHora' não encontrada no arquivo local.")
+            return pd.DataFrame()
+        
+        df_local["DataHora"] = pd.to_datetime(df_local["DataHora"], errors="coerce", utc=True)
+        
+        for col in ["Level", "Rank", "Points"]:
+            if col in df_local.columns:
+                df_local[col] = pd.to_numeric(df_local[col], errors="coerce")
+        
+        df_local.dropna(subset=["DataHora"], inplace=True)
+        df_local.sort_values(["Name", "DataHora"], inplace=True)
+        df_local["DataHora_BRT"] = df_local["DataHora"].dt.tz_convert("America/Sao_Paulo")
+        
+        return df_local
     except Exception as e:
         st.error(f"❌ Erro ao carregar arquivo local: {e}")
         return pd.DataFrame()
